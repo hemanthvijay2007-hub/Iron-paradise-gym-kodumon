@@ -76,9 +76,12 @@ export const About = ({ setActivePage, onOpenJoinModal }) => {
           <div style={{ position: 'relative' }}>
             <div style={{ borderRadius: 'var(--radius-lg)', overflow: 'hidden', border: '1px solid var(--border-card)', boxShadow: 'var(--shadow-lg)' }}>
               <img
-                src="/images/gym_interior.jpg"
+                src={siteInfo.interiorImage || '/images/gym_interior.jpg'}
                 alt="IRON PARADISE Gym Floor"
                 style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                onError={(e) => {
+                  e.target.src = '/images/gym_interior.jpg';
+                }}
               />
             </div>
           </div>

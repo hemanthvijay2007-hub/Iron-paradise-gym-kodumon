@@ -36,7 +36,7 @@ export const Home = ({ setActivePage, onOpenJoinModal }) => {
       <section className="hero-section">
         <div
           className="hero-bg-layer"
-          style={{ backgroundImage: `url('/images/hero_gym.jpg')` }}
+          style={{ backgroundImage: `url('${siteInfo.heroImage || '/images/hero_gym.jpg'}')` }}
         />
         <div className="hero-overlay" />
         <div className="hero-grid-pattern" />
@@ -219,9 +219,12 @@ export const Home = ({ setActivePage, onOpenJoinModal }) => {
                 }}
               >
                 <img
-                  src="/images/gym_interior.jpg"
+                  src={siteInfo.interiorImage || '/images/gym_interior.jpg'}
                   alt="IRON PARADISE Gym Floor"
                   style={{ width: '100%', height: 'auto', display: 'block', objectFit: 'cover' }}
+                  onError={(e) => {
+                    e.target.src = '/images/gym_interior.jpg';
+                  }}
                 />
               </div>
               <div

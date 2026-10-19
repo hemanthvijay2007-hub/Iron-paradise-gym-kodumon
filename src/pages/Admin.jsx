@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useGym } from '../context/GymContext';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { ImageUploader } from '../components/ImageUploader';
+import { getActiveCredentials } from '../services/supabaseClient';
 import {
   ShieldCheck,
   LayoutDashboard,
@@ -23,6 +24,12 @@ import {
   Download,
   Upload,
   RefreshCw,
+  Cloud,
+  CloudOff,
+  Copy,
+  Check,
+  CheckCircle2,
+  Loader2,
 } from 'lucide-react';
 
 export const Admin = ({ setActivePage }) => {
@@ -50,6 +57,13 @@ export const Admin = ({ setActivePage }) => {
     exportDataJSON,
     importDataJSON,
     getStorageUsage,
+    isCloudActive,
+    isCloudSyncing,
+    lastCloudSync,
+    refreshFromCloud,
+    syncAllToCloud,
+    configureCloudCredentials,
+    clearCloudCredentials,
   } = useGym();
 
   // Navigation tab
@@ -105,6 +119,18 @@ export const Admin = ({ setActivePage }) => {
 
   // Enquiries filter
   const [enquiryFilter, setEnquiryFilter] = useState('All');
+
+  // Cloud configuration state
+  const [cloudConfigForm, setCloudConfigForm] = useState(() => {
+    const creds = getActiveCredentials();
+    return {
+      url: creds.url || '',
+      anonKey: creds.anonKey || '',
+    };
+  });
+  const [isSavingCloud, setIsSavingCloud] = useState(false);
+  const [isSeedingCloud, setIsSeedingCloud] = useState(false);
+  const [copiedSql, setCopiedSql] = useState(false);
 
   // Handle Login
   const handleLoginSubmit = (e) => {
@@ -494,6 +520,37 @@ export const Admin = ({ setActivePage }) => {
           </button>
 
           <button
+            className={`admin-nav-item ${activeTab === 'cloud' ? 'active' : ''}`}
+            onClick={() => setActiveTab('cloud')}
+          >
+            <Cloud size={18} /> Cloud & Multi-Device
+            {isCloudActive ? (
+              <span
+                style={{
+                  marginLeft: 'auto',
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  background: '#10b981',
+                  boxShadow: '0 0 6px #10b981',
+                }}
+                title="Cloud Connected"
+              />
+            ) : (
+              <span
+                style={{
+                  marginLeft: 'auto',
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  background: '#f59e0b',
+                }}
+                title="Local Mode"
+              />
+            )}
+          </button>
+
+          <button
             className={`admin-nav-item ${activeTab === 'backup' ? 'active' : ''}`}
             onClick={() => setActiveTab('backup')}
           >
@@ -513,6 +570,100 @@ export const Admin = ({ setActivePage }) => {
                 <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
                   Real-time control center for IRON PARADISE website content, membership leads, and media assets.
                 </p>
+              </div>
+
+              {/* Cloud Sync Status Banner */}
+              <div
+                style={{
+                  background: isCloudActive
+                    ? 'linear-gradient(90deg, rgba(16, 185, 129, 0.12) 0%, rgba(56, 189, 248, 0.08) 100%)'
+                    : 'linear-gradient(90deg, rgba(245, 158, 11, 0.12) 0%, rgba(239, 68, 68, 0.08) 100%)',
+                  border: isCloudActive ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(245, 158, 11, 0.3)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '1.1rem 1.25rem',
+                  marginBottom: '2rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '1rem',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                  <div
+                    style={{
+                      width: '2.6rem',
+                      height: '2.6rem',
+                      borderRadius: '50%',
+                      background: isCloudActive ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)',
+                      color: isCloudActive ? '#10b981' : '#f59e0b',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {isCloudActive ? <Cloud size={20} /> : <CloudOff size={20} />}
+                  </div>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <strong style={{ color: '#fff', fontSize: '0.95rem' }}>
+                        {isCloudActive ? 'Multi-Device Cloud Sync: ACTIVE' : 'Multi-Device Cloud Sync: LOCAL MODE'}
+                      </strong>
+                      <span
+                        style={{
+                          fontSize: '0.72rem',
+                          padding: '0.12rem 0.5rem',
+                          borderRadius: '999px',
+                          fontWeight: 700,
+                          background: isCloudActive ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)',
+                          color: isCloudActive ? '#34d399' : '#fbbf24',
+                        }}
+                      >
+                        {isCloudActive ? 'Supabase Database & Storage' : 'Device-Only Cache'}
+                      </span>
+                    </div>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', marginTop: '0.2rem' }}>
+                      {isCloudActive
+                        ? `Photos & content saved here are immediately visible to all visitors on any device.${lastCloudSync ? ` (Last sync: ${lastCloudSync})` : ''}`
+                        : 'Changes and photo uploads are currently stored on this browser only. Connect Supabase to share across all devices.'}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  {isCloudActive ? (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => refreshFromCloud(false)}
+                        disabled={isCloudSyncing}
+                        style={{ fontSize: '0.8rem', padding: '0.4rem 0.8rem' }}
+                      >
+                        <RefreshCw size={14} className={isCloudSyncing ? 'animate-spin' : ''} />
+                        {isCloudSyncing ? 'Syncing...' : 'Refresh from Cloud'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => setActiveTab('cloud')}
+                        style={{ fontSize: '0.8rem', padding: '0.4rem 0.8rem' }}
+                      >
+                        Cloud Status
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => setActiveTab('cloud')}
+                      style={{ fontSize: '0.8rem', padding: '0.45rem 1rem' }}
+                    >
+                      <Cloud size={14} /> Connect Cloud (Free Setup)
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* KPI Cards */}
@@ -1475,7 +1626,8 @@ export const Admin = ({ setActivePage }) => {
                           label="Coach Photo (Select from Device)"
                           value={newTrainer.image}
                           onChange={(val) => setNewTrainer({ ...newTrainer, image: val })}
-                          recommendedText="Select coach photo from device folder (JPEG, PNG, WebP)"
+                          folder="trainers"
+                          recommendedText="Select coach photo from device folder (JPEG, PNG, WebP) - synced to cloud"
                         />
 
                         <div className="form-group">
@@ -1548,7 +1700,8 @@ export const Admin = ({ setActivePage }) => {
                           label="Coach Photo (Select from Device)"
                           value={editingTrainer.image}
                           onChange={(val) => setEditingTrainer({ ...editingTrainer, image: val })}
-                          recommendedText="Select coach photo from device folder (JPEG, PNG, WebP)"
+                          folder="trainers"
+                          recommendedText="Select coach photo from device folder (JPEG, PNG, WebP) - synced to cloud"
                         />
 
                         <div className="form-group">
@@ -1719,7 +1872,8 @@ export const Admin = ({ setActivePage }) => {
                           label="Select Photo from Folder / Device"
                           value={newGalleryItem.image}
                           onChange={(val) => setNewGalleryItem({ ...newGalleryItem, image: val })}
-                          recommendedText="Select any image from your device folder (JPEG, PNG, WebP) - automatically optimized"
+                          folder="gallery"
+                          recommendedText="Select any image from your device folder (JPEG, PNG, WebP) - automatically saved to Cloud Storage"
                         />
 
                         <div className="form-group">
@@ -1805,6 +1959,376 @@ export const Admin = ({ setActivePage }) => {
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* TAB: CLOUD STORAGE & SHARED DATABASE */}
+          {activeTab === 'cloud' && (
+            <div>
+              <div style={{ marginBottom: '1.5rem' }}>
+                <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '2.2rem', color: '#fff', marginBottom: '0.25rem' }}>
+                  CLOUD STORAGE & SHARED DATABASE
+                </h1>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                  Connect your free Supabase cloud backend to enable multi-device synchronization. Photos uploaded and edits made here will immediately appear on all phones, tablets, and computers.
+                </p>
+              </div>
+
+              {/* Status Header Banner */}
+              <div
+                style={{
+                  background: isCloudActive
+                    ? 'linear-gradient(90deg, rgba(16, 185, 129, 0.15) 0%, rgba(56, 189, 248, 0.1) 100%)'
+                    : 'linear-gradient(90deg, rgba(245, 158, 11, 0.15) 0%, rgba(239, 68, 68, 0.1) 100%)',
+                  border: isCloudActive ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid rgba(245, 158, 11, 0.4)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '1.25rem 1.5rem',
+                  marginBottom: '2rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '1rem',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                  <div
+                    style={{
+                      width: '3.2rem',
+                      height: '3.2rem',
+                      borderRadius: '50%',
+                      background: isCloudActive ? 'rgba(16, 185, 129, 0.25)' : 'rgba(245, 158, 11, 0.25)',
+                      color: isCloudActive ? '#10b981' : '#f59e0b',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {isCloudActive ? <Cloud size={24} /> : <CloudOff size={24} />}
+                  </div>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                      <h3 style={{ color: '#fff', fontSize: '1.15rem', margin: 0 }}>
+                        {isCloudActive ? 'Multi-Device Synchronization: ACTIVE' : 'Status: LOCAL DEMO MODE (Device-Only)'}
+                      </h3>
+                      <span
+                        style={{
+                          fontSize: '0.75rem',
+                          padding: '0.15rem 0.55rem',
+                          borderRadius: '999px',
+                          fontWeight: 700,
+                          background: isCloudActive ? '#10b981' : '#f59e0b',
+                          color: '#000',
+                        }}
+                      >
+                        {isCloudActive ? 'CONNECTED' : 'ACTION REQUIRED'}
+                      </span>
+                    </div>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', margin: '0.35rem 0 0 0' }}>
+                      {isCloudActive
+                        ? `Shared PostgreSQL database and public 'gym-images' storage bucket active.${lastCloudSync ? ` Last synced: ${lastCloudSync}.` : ''}`
+                        : 'Changes and uploaded photos exist only on this browser cache. To make them visible to other phones/visitors, connect Supabase below.'}
+                    </p>
+                  </div>
+                </div>
+
+                {isCloudActive && (
+                  <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => refreshFromCloud(false)}
+                      disabled={isCloudSyncing}
+                    >
+                      <RefreshCw size={14} className={isCloudSyncing ? 'animate-spin' : ''} />
+                      {isCloudSyncing ? 'Refreshing...' : 'Refresh from Cloud'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={async () => {
+                        setIsSeedingCloud(true);
+                        await syncAllToCloud();
+                        setIsSeedingCloud(false);
+                      }}
+                      disabled={isSeedingCloud || isCloudSyncing}
+                    >
+                      {isSeedingCloud ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                      {isSeedingCloud ? 'Pushing Data...' : 'Sync All Data to Cloud'}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
+                {/* Connection Settings Card */}
+                <div className="admin-card" style={{ margin: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem' }}>
+                    <div
+                      style={{
+                        width: '2.5rem',
+                        height: '2.5rem',
+                        borderRadius: '50%',
+                        background: 'rgba(56, 189, 248, 0.15)',
+                        color: '#38bdf8',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Database size={20} />
+                    </div>
+                    <div>
+                      <h3 style={{ color: '#fff', fontSize: '1.2rem', margin: 0 }}>SUPABASE CREDENTIALS</h3>
+                      <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Project URL & Public Anon Key</div>
+                    </div>
+                  </div>
+
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      setIsSavingCloud(true);
+                      await configureCloudCredentials(cloudConfigForm.url, cloudConfigForm.anonKey);
+                      setIsSavingCloud(false);
+                    }}
+                  >
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="supabase-url">
+                        Supabase Project URL *
+                      </label>
+                      <input
+                        id="supabase-url"
+                        type="url"
+                        required
+                        placeholder="https://yourprojectid.supabase.co"
+                        className="form-input"
+                        value={cloudConfigForm.url}
+                        onChange={(e) => setCloudConfigForm({ ...cloudConfigForm, url: e.target.value })}
+                      />
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                        Found in Supabase: Project Settings → API → Project URL
+                      </div>
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="supabase-key">
+                        Supabase Anon / Public Key *
+                      </label>
+                      <textarea
+                        id="supabase-key"
+                        required
+                        rows={3}
+                        placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                        className="form-textarea"
+                        style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}
+                        value={cloudConfigForm.anonKey}
+                        onChange={(e) => setCloudConfigForm({ ...cloudConfigForm, anonKey: e.target.value })}
+                      />
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                        Found in Supabase: Project Settings → API → Project API Keys → `anon` `public`
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '0.6rem', marginTop: '1.25rem' }}>
+                      <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={isSavingCloud}>
+                        {isSavingCloud ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                        {isSavingCloud ? 'Connecting...' : 'Save & Test Connection'}
+                      </button>
+                      {isCloudActive && (
+                        <button
+                          type="button"
+                          className="btn btn-outline"
+                          style={{ color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.4)' }}
+                          onClick={() => {
+                            clearCloudCredentials();
+                            setCloudConfigForm({ url: '', anonKey: '' });
+                          }}
+                        >
+                          Disconnect
+                        </button>
+                      )}
+                    </div>
+                  </form>
+
+                  <div
+                    style={{
+                      marginTop: '1.5rem',
+                      paddingTop: '1rem',
+                      borderTop: '1px solid var(--border-subtle)',
+                      fontSize: '0.8rem',
+                      color: 'var(--text-secondary)',
+                      lineHeight: '1.5',
+                    }}
+                  >
+                    <strong>💡 Permanent Vercel Deployment Note:</strong>
+                    <br />
+                    You can also set these environment variables in your Vercel Dashboard under <em>Settings → Environment Variables</em>:
+                    <ul style={{ paddingLeft: '1.2rem', margin: '0.4rem 0' }}>
+                      <li><code>VITE_SUPABASE_URL</code></li>
+                      <li><code>VITE_SUPABASE_ANON_KEY</code></li>
+                    </ul>
+                  </div>
+                </div>
+
+                {/* Setup Guide & SQL Card */}
+                <div className="admin-card" style={{ margin: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem' }}>
+                    <div
+                      style={{
+                        width: '2.5rem',
+                        height: '2.5rem',
+                        borderRadius: '50%',
+                        background: 'rgba(16, 185, 129, 0.15)',
+                        color: '#10b981',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <CheckCircle2 size={20} />
+                    </div>
+                    <div>
+                      <h3 style={{ color: '#fff', fontSize: '1.2rem', margin: 0 }}>3-STEP CLOUD SETUP</h3>
+                      <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>100% Free • Takes 2 Minutes</div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                    <div style={{ background: 'var(--bg-charcoal)', padding: '0.85rem', borderRadius: 'var(--radius-sm)' }}>
+                      <div style={{ fontWeight: 700, color: '#fff', fontSize: '0.88rem', marginBottom: '0.2rem' }}>
+                        1. Create Free Supabase Project
+                      </div>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                        Go to <a href="https://supabase.com" target="_blank" rel="noreferrer" style={{ color: '#38bdf8', textDecoration: 'underline' }}>supabase.com</a>, sign in with GitHub, and click <strong>"New Project"</strong>. Choose a name and database password.
+                      </div>
+                    </div>
+
+                    <div style={{ background: 'var(--bg-charcoal)', padding: '0.85rem', borderRadius: 'var(--radius-sm)' }}>
+                      <div style={{ fontWeight: 700, color: '#fff', fontSize: '0.88rem', marginBottom: '0.2rem' }}>
+                        2. Run the Database & Storage SQL Schema
+                      </div>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                        Open <strong>SQL Editor</strong> in Supabase, create a new query, paste the prepared schema script, and click <strong>RUN</strong>. This creates all tables and the public <code>gym-images</code> bucket.
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        style={{ width: '100%' }}
+                        onClick={() => {
+                          const schemaText = `-- Run in Supabase SQL Editor
+CREATE TABLE IF NOT EXISTS public.gym_site_info (
+  id INT PRIMARY KEY DEFAULT 1,
+  gym_name TEXT NOT NULL DEFAULT 'IRON PARADISE',
+  phone TEXT NOT NULL DEFAULT '+91 99615 12136',
+  whatsapp_number TEXT NOT NULL DEFAULT '919961512136',
+  instagram_url TEXT DEFAULT 'https://www.instagram.com/iron_paradise_multi_gym/',
+  location_url TEXT DEFAULT 'https://share.google/YxMJbJvSD5aDmA17K',
+  address_placeholder TEXT DEFAULT 'IRON PARADISE Multi-Gym, Kodumon',
+  hours_placeholder TEXT DEFAULT 'Mon - Sat: 5:30 AM - 10:00 PM | Sun: Inquire',
+  hero_headline TEXT DEFAULT 'BUILD STRENGTH. BECOME UNSTOPPABLE.',
+  hero_tagline TEXT DEFAULT 'Step into an elite fitness atmosphere engineered for high-performance training.',
+  about_heading TEXT DEFAULT 'WHERE DEDICATION MEETS PURE IRON',
+  about_text TEXT DEFAULT 'IRON PARADISE was forged for those who refuse to settle.',
+  about_mission TEXT DEFAULT 'To deliver a distraction-free, high-standard fitness space.',
+  about_vision TEXT DEFAULT 'To be the leading strength and bodybuilding destination.',
+  facilities_note TEXT DEFAULT 'Facility features customizable in Admin.',
+  notice_banner TEXT DEFAULT '⚡ Welcome to IRON PARADISE!',
+  show_notice_banner BOOLEAN DEFAULT true,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.gym_plans (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  price TEXT NOT NULL,
+  billing TEXT NOT NULL DEFAULT 'Monthly',
+  badge TEXT DEFAULT '',
+  is_popular BOOLEAN DEFAULT false,
+  features JSONB DEFAULT '[]'::jsonb,
+  description TEXT DEFAULT '',
+  display_order INT DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.gym_trainers (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  role TEXT NOT NULL,
+  specialties TEXT[] DEFAULT ARRAY[]::TEXT[],
+  bio TEXT DEFAULT '',
+  image TEXT NOT NULL,
+  display_order INT DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.gym_gallery (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'Gym Floor',
+  image TEXT NOT NULL,
+  caption TEXT DEFAULT '',
+  display_order INT DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.gym_enquiries (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  email TEXT DEFAULT '',
+  plan_interest TEXT DEFAULT '',
+  message TEXT DEFAULT '',
+  status TEXT DEFAULT 'New',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+INSERT INTO storage.buckets (id, name, public) VALUES ('gym-images', 'gym-images', true) ON CONFLICT (id) DO UPDATE SET public = true;
+
+ALTER TABLE public.gym_site_info ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.gym_plans ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.gym_trainers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.gym_gallery ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.gym_enquiries ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public Read All" ON public.gym_site_info FOR SELECT USING (true);
+CREATE POLICY "Public Read Plans" ON public.gym_plans FOR SELECT USING (true);
+CREATE POLICY "Public Read Trainers" ON public.gym_trainers FOR SELECT USING (true);
+CREATE POLICY "Public Read Gallery" ON public.gym_gallery FOR SELECT USING (true);
+CREATE POLICY "Public Submit Enq" ON public.gym_enquiries FOR INSERT WITH CHECK (true);
+
+CREATE POLICY "Allow Write Site" ON public.gym_site_info FOR ALL USING (true);
+CREATE POLICY "Allow Write Plans" ON public.gym_plans FOR ALL USING (true);
+CREATE POLICY "Allow Write Trainers" ON public.gym_trainers FOR ALL USING (true);
+CREATE POLICY "Allow Write Gallery" ON public.gym_gallery FOR ALL USING (true);
+CREATE POLICY "Allow Write Enquiries" ON public.gym_enquiries FOR ALL USING (true);
+
+CREATE POLICY "Public Storage Read" ON storage.objects FOR SELECT USING (bucket_id = 'gym-images');
+CREATE POLICY "Public Storage Upload" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'gym-images');
+CREATE POLICY "Public Storage Update" ON storage.objects FOR UPDATE USING (bucket_id = 'gym-images');
+CREATE POLICY "Public Storage Delete" ON storage.objects FOR DELETE USING (bucket_id = 'gym-images');
+`;
+                          navigator.clipboard.writeText(schemaText);
+                          setCopiedSql(true);
+                          setTimeout(() => setCopiedSql(false), 3000);
+                        }}
+                      >
+                        {copiedSql ? <Check size={14} color="#10b981" /> : <Copy size={14} />}
+                        {copiedSql ? 'SQL Copied to Clipboard!' : 'Copy SQL Schema Script (supabase/schema.sql)'}
+                      </button>
+                    </div>
+
+                    <div style={{ background: 'var(--bg-charcoal)', padding: '0.85rem', borderRadius: 'var(--radius-sm)' }}>
+                      <div style={{ fontWeight: 700, color: '#fff', fontSize: '0.88rem', marginBottom: '0.2rem' }}>
+                        3. Copy URL & Key, Then Sync
+                      </div>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                        Paste your Project URL & Anon Key into the form on the left, click <strong>Save & Test</strong>, then click <strong>Sync All Data to Cloud</strong>. All devices will now sync live!
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           )}

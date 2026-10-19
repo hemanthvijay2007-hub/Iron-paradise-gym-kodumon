@@ -31,7 +31,14 @@ export const Trainers = () => {
           {trainers.map((tr) => (
             <div key={tr.id} className="trainer-card">
               <div className="trainer-img-wrap">
-                <img src={tr.image} alt={tr.name} className="trainer-img" />
+                <img
+                  src={tr.image}
+                  alt={tr.name}
+                  className="trainer-img"
+                  onError={(e) => {
+                    e.target.src = '/images/trainer_male.jpg';
+                  }}
+                />
                 <div className="trainer-overlay" />
               </div>
               <div className="trainer-info">

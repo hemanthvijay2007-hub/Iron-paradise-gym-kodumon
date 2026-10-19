@@ -6,7 +6,7 @@ import { InstagramIcon } from './InstagramIcon';
 const CURRENT_YEAR = new Date().getFullYear();
 
 export const Footer = ({ setActivePage }) => {
-  const { siteInfo } = useGym();
+  const { siteInfo, isCloudActive } = useGym();
 
   const handleNav = (page) => {
     setActivePage(page);
@@ -221,8 +221,8 @@ export const Footer = ({ setActivePage }) => {
             &copy; {CURRENT_YEAR} <strong>{siteInfo.gymName}</strong>. All rights reserved.
           </div>
           <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>
-              Client Demo Site • Frontend-only state via localStorage
+            <span style={{ fontSize: '0.8rem', color: isCloudActive ? '#34d399' : 'var(--text-dim)' }}>
+              {isCloudActive ? '☁️ Cloud Sync Active • Multi-Device Enabled' : 'Iron Paradise Multi-Gym • Kodumon'}
             </span>
             <a
               href={siteInfo.instagramUrl}

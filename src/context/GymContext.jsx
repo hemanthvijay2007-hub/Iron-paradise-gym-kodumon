@@ -1,5 +1,24 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { INITIAL_DATA } from '../data/initialData';
+import { isCloudConfigured, saveRuntimeCloudConfig, clearRuntimeCloudConfig } from '../services/supabaseClient';
+import {
+  fetchGymDataFromCloud,
+  subscribeToGymChanges,
+  saveSiteInfoToCloud,
+  addTrainerToCloud,
+  updateTrainerInCloud,
+  deleteTrainerFromCloud,
+  addGalleryItemToCloud,
+  updateGalleryItemInCloud,
+  deleteGalleryItemFromCloud,
+  addPlanToCloud,
+  updatePlanInCloud,
+  deletePlanFromCloud,
+  addEnquiryToCloud,
+  updateEnquiryStatusInCloud,
+  deleteEnquiryFromCloud,
+  seedInitialDataToCloud,
+} from '../services/gymService';
 
 const STORAGE_KEY = 'iron_paradise_storage_v1';
 const ADMIN_AUTH_KEY = 'iron_paradise_admin_session';
@@ -7,13 +26,12 @@ const ADMIN_AUTH_KEY = 'iron_paradise_admin_session';
 const GymContext = createContext(null);
 
 export const GymProvider = ({ children }) => {
-  // Load data from localStorage or fallback to INITIAL_DATA
+  // Load initial data from localStorage or fallback to INITIAL_DATA
   const [data, setData] = useState(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        // Ensure deep merging in case fields are missing
         return {
           siteInfo: { ...INITIAL_DATA.siteInfo, ...(parsed.siteInfo || {}) },
           plans: Array.isArray(parsed.plans) ? parsed.plans : INITIAL_DATA.plans,
@@ -29,49 +47,155 @@ export const GymProvider = ({ children }) => {
     return INITIAL_DATA;
   });
 
-  // Admin session state (demo frontend-only)
+  // Admin session state
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(() => {
     return sessionStorage.getItem(ADMIN_AUTH_KEY) === 'true';
   });
+
+  // Cloud status state
+  const [isCloudActive, setIsCloudActive] = useState(() => isCloudConfigured());
+  const [isCloudSyncing, setIsCloudSyncing] = useState(false);
+  const [lastCloudSync, setLastCloudSync] = useState(null);
+  const [cloudError, setCloudError] = useState(null);
 
   // Toast notification state
   const [toasts, setToasts] = useState([]);
 
   // Toast helper
-  const showToast = (message, type = 'success') => {
+  const showToast = useCallback((message, type = 'success') => {
     const id = Date.now() + Math.random().toString(36).substring(2, 6);
     setToasts((prev) => [...prev, { id, message, type }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
-  };
+    }, 4500);
+  }, []);
 
   const removeToast = (id) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  // Sync data to localStorage whenever it changes
+  // Sync data to localStorage cache whenever it changes
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     } catch (e) {
       console.error('Failed to write to localStorage:', e);
-      setTimeout(() => {
-        showToast('Storage limit reached! Please use smaller images or export your data.', 'error');
-      }, 0);
     }
   }, [data]);
 
+  // Pull latest data from Supabase Cloud
+  const refreshFromCloud = useCallback(async (isInitial = false) => {
+    if (!isCloudConfigured()) {
+      setIsCloudActive(false);
+      return;
+    }
+
+    setIsCloudSyncing(true);
+    setCloudError(null);
+
+    try {
+      const res = await fetchGymDataFromCloud();
+      if (res && res.data) {
+        setData(res.data);
+        setIsCloudActive(true);
+        setLastCloudSync(new Date().toLocaleTimeString());
+        if (!isInitial) {
+          showToast('Synced latest content from shared cloud database!', 'success');
+        }
+      } else if (res && res.isEmpty) {
+        // Connected to Supabase, but tables are not yet seeded
+        setIsCloudActive(true);
+        setLastCloudSync(new Date().toLocaleTimeString());
+        console.info('Cloud database is connected but empty. Ready to seed initial data.');
+      }
+    } catch (err) {
+      console.error('Failed to sync from cloud:', err);
+      setCloudError(err.message);
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  }, [showToast]);
+
+  // Initialize Cloud Sync & Realtime Subscription on Mount
+  useEffect(() => {
+    let isMounted = true;
+
+    const initCloud = async () => {
+      if (isMounted) {
+        await refreshFromCloud(true);
+      }
+    };
+
+    initCloud();
+
+    // Subscribe to multi-device real-time updates
+    const unsubscribe = subscribeToGymChanges((tableName) => {
+      console.log(`[Realtime Sync] Detected change in ${tableName}, updating state...`);
+      if (isMounted) {
+        refreshFromCloud(false);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      if (typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
+    };
+  }, [refreshFromCloud]);
+
+  // Push local state to cloud (Seed / Initial Sync)
+  const syncAllToCloud = async () => {
+    if (!isCloudConfigured()) {
+      showToast('Please configure your Supabase Project URL and Anon Key first.', 'error');
+      return false;
+    }
+    setIsCloudSyncing(true);
+    try {
+      await seedInitialDataToCloud(data);
+      showToast('All gym data successfully seeded and synced to Supabase Cloud!', 'success');
+      setIsCloudActive(true);
+      setLastCloudSync(new Date().toLocaleTimeString());
+      return true;
+    } catch (err) {
+      console.error('Error seeding data to cloud:', err);
+      showToast(`Cloud sync failed: ${err.message}`, 'error');
+      return false;
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
+
+  // Configure runtime cloud credentials
+  const configureCloudCredentials = async (url, anonKey) => {
+    try {
+      saveRuntimeCloudConfig(url, anonKey);
+      setIsCloudActive(true);
+      showToast('Cloud credentials saved! Testing connection...', 'info');
+      await refreshFromCloud(false);
+      showToast('Connected to Supabase shared cloud database & storage!', 'success');
+      return true;
+    } catch (err) {
+      showToast(`Connection failed: ${err.message}`, 'error');
+      return false;
+    }
+  };
+
+  const clearCloudCredentials = () => {
+    clearRuntimeCloudConfig();
+    setIsCloudActive(false);
+    showToast('Cloud credentials cleared. Operating in local mode.', 'info');
+  };
+
   // Admin login / logout
   const adminLogin = (username, password) => {
-    // Frontend demo authentication credentials
     if (username.trim() === 'admin' && password === 'ironparadise') {
       setIsAdminLoggedIn(true);
       sessionStorage.setItem(ADMIN_AUTH_KEY, 'true');
-      showToast('Admin logged in successfully! (Demo Mode)', 'success');
+      showToast('Admin logged in successfully!', 'success');
       return true;
     } else {
-      showToast('Invalid credentials! Use demo login: admin / ironparadise', 'error');
+      showToast('Invalid credentials! Default: admin / ironparadise', 'error');
       return false;
     }
   };
@@ -83,16 +207,30 @@ export const GymProvider = ({ children }) => {
   };
 
   // Site info
-  const updateSiteInfo = (newInfo) => {
+  const updateSiteInfo = async (newInfo) => {
+    const updated = { ...data.siteInfo, ...newInfo };
     setData((prev) => ({
       ...prev,
-      siteInfo: { ...prev.siteInfo, ...newInfo },
+      siteInfo: updated,
     }));
-    showToast('Website content saved successfully!', 'success');
+
+    if (isCloudConfigured()) {
+      try {
+        await saveSiteInfoToCloud(updated);
+        showToast('Website content saved to Cloud Database & visible to all visitors!', 'success');
+        setLastCloudSync(new Date().toLocaleTimeString());
+        return;
+      } catch (err) {
+        console.error('Cloud save failed:', err);
+        showToast(`Saved locally. Cloud sync warning: ${err.message}`, 'error');
+        return;
+      }
+    }
+    showToast('Website content saved locally! (Connect Supabase for multi-device sync)', 'success');
   };
 
   // Plans CRUD
-  const addPlan = (plan) => {
+  const addPlan = async (plan) => {
     const newPlan = {
       ...plan,
       id: 'plan-' + Date.now(),
@@ -101,27 +239,57 @@ export const GymProvider = ({ children }) => {
       ...prev,
       plans: [newPlan, ...prev.plans],
     }));
+
+    if (isCloudConfigured()) {
+      try {
+        await addPlanToCloud(newPlan);
+        showToast('New membership plan saved to Cloud Database!', 'success');
+        return;
+      } catch (err) {
+        console.error('Cloud plan save error:', err);
+      }
+    }
     showToast('New membership plan created!', 'success');
   };
 
-  const updatePlan = (id, updatedFields) => {
+  const updatePlan = async (id, updatedFields) => {
     setData((prev) => ({
       ...prev,
       plans: prev.plans.map((p) => (p.id === id ? { ...p, ...updatedFields } : p)),
     }));
+
+    if (isCloudConfigured()) {
+      try {
+        await updatePlanInCloud(id, updatedFields);
+        showToast('Membership plan updated in Cloud Database!', 'success');
+        return;
+      } catch (err) {
+        console.error('Cloud plan update error:', err);
+      }
+    }
     showToast('Membership plan updated!', 'success');
   };
 
-  const deletePlan = (id) => {
+  const deletePlan = async (id) => {
     setData((prev) => ({
       ...prev,
       plans: prev.plans.filter((p) => p.id !== id),
     }));
+
+    if (isCloudConfigured()) {
+      try {
+        await deletePlanFromCloud(id);
+        showToast('Membership plan deleted from Cloud Database!', 'info');
+        return;
+      } catch (err) {
+        console.error('Cloud plan delete error:', err);
+      }
+    }
     showToast('Membership plan deleted!', 'info');
   };
 
   // Trainers CRUD
-  const addTrainer = (trainer) => {
+  const addTrainer = async (trainer) => {
     const newTrainer = {
       ...trainer,
       id: 'tr-' + Date.now(),
@@ -130,27 +298,63 @@ export const GymProvider = ({ children }) => {
       ...prev,
       trainers: [newTrainer, ...prev.trainers],
     }));
+
+    if (isCloudConfigured()) {
+      try {
+        await addTrainerToCloud(newTrainer);
+        showToast('Trainer profile & image saved to Cloud! Visible on all devices.', 'success');
+        setLastCloudSync(new Date().toLocaleTimeString());
+        return;
+      } catch (err) {
+        console.error('Cloud trainer save error:', err);
+        showToast(`Saved locally. Cloud sync warning: ${err.message}`, 'error');
+        return;
+      }
+    }
     showToast('New trainer profile added!', 'success');
   };
 
-  const updateTrainer = (id, updatedFields) => {
+  const updateTrainer = async (id, updatedFields) => {
     setData((prev) => ({
       ...prev,
       trainers: prev.trainers.map((t) => (t.id === id ? { ...t, ...updatedFields } : t)),
     }));
+
+    if (isCloudConfigured()) {
+      try {
+        await updateTrainerInCloud(id, updatedFields);
+        showToast('Trainer profile updated in Cloud! Visible across all devices.', 'success');
+        setLastCloudSync(new Date().toLocaleTimeString());
+        return;
+      } catch (err) {
+        console.error('Cloud trainer update error:', err);
+        showToast(`Saved locally. Cloud sync warning: ${err.message}`, 'error');
+        return;
+      }
+    }
     showToast('Trainer profile updated!', 'success');
   };
 
-  const deleteTrainer = (id) => {
+  const deleteTrainer = async (id) => {
     setData((prev) => ({
       ...prev,
       trainers: prev.trainers.filter((t) => t.id !== id),
     }));
+
+    if (isCloudConfigured()) {
+      try {
+        await deleteTrainerFromCloud(id);
+        showToast('Trainer profile removed from Cloud Database!', 'info');
+        return;
+      } catch (err) {
+        console.error('Cloud trainer delete error:', err);
+      }
+    }
     showToast('Trainer profile removed!', 'info');
   };
 
   // Gallery CRUD
-  const addGalleryItem = (item) => {
+  const addGalleryItem = async (item) => {
     const newItem = {
       ...item,
       id: 'gal-' + Date.now(),
@@ -159,27 +363,61 @@ export const GymProvider = ({ children }) => {
       ...prev,
       gallery: [newItem, ...prev.gallery],
     }));
+
+    if (isCloudConfigured()) {
+      try {
+        await addGalleryItemToCloud(newItem);
+        showToast('Gallery image saved to Cloud Storage & Database! Live on all devices.', 'success');
+        setLastCloudSync(new Date().toLocaleTimeString());
+        return;
+      } catch (err) {
+        console.error('Cloud gallery save error:', err);
+        showToast(`Saved locally. Cloud sync warning: ${err.message}`, 'error');
+        return;
+      }
+    }
     showToast('Image added to gallery!', 'success');
   };
 
-  const updateGalleryItem = (id, updatedFields) => {
+  const updateGalleryItem = async (id, updatedFields) => {
     setData((prev) => ({
       ...prev,
       gallery: prev.gallery.map((g) => (g.id === id ? { ...g, ...updatedFields } : g)),
     }));
+
+    if (isCloudConfigured()) {
+      try {
+        await updateGalleryItemInCloud(id, updatedFields);
+        showToast('Gallery item updated in Cloud Database!', 'success');
+        setLastCloudSync(new Date().toLocaleTimeString());
+        return;
+      } catch (err) {
+        console.error('Cloud gallery update error:', err);
+      }
+    }
     showToast('Gallery item updated!', 'success');
   };
 
-  const deleteGalleryItem = (id) => {
+  const deleteGalleryItem = async (id) => {
     setData((prev) => ({
       ...prev,
       gallery: prev.gallery.filter((g) => g.id !== id),
     }));
+
+    if (isCloudConfigured()) {
+      try {
+        await deleteGalleryItemFromCloud(id);
+        showToast('Gallery item removed from Cloud Database!', 'info');
+        return;
+      } catch (err) {
+        console.error('Cloud gallery delete error:', err);
+      }
+    }
     showToast('Gallery item deleted!', 'info');
   };
 
   // Enquiries CRUD
-  const addEnquiry = (enquiry) => {
+  const addEnquiry = async (enquiry) => {
     const newEnquiry = {
       ...enquiry,
       id: 'enq-' + Date.now(),
@@ -190,23 +428,47 @@ export const GymProvider = ({ children }) => {
       ...prev,
       enquiries: [newEnquiry, ...prev.enquiries],
     }));
+
+    if (isCloudConfigured()) {
+      try {
+        await addEnquiryToCloud(newEnquiry);
+      } catch (err) {
+        console.error('Cloud enquiry save error:', err);
+      }
+    }
     showToast('Enquiry submitted successfully! We will connect soon.', 'success');
     return newEnquiry;
   };
 
-  const updateEnquiryStatus = (id, status) => {
+  const updateEnquiryStatus = async (id, status) => {
     setData((prev) => ({
       ...prev,
       enquiries: prev.enquiries.map((e) => (e.id === id ? { ...e, status } : e)),
     }));
+
+    if (isCloudConfigured()) {
+      try {
+        await updateEnquiryStatusInCloud(id, status);
+      } catch (err) {
+        console.error('Cloud enquiry update error:', err);
+      }
+    }
     showToast(`Enquiry marked as ${status}!`, 'info');
   };
 
-  const deleteEnquiry = (id) => {
+  const deleteEnquiry = async (id) => {
     setData((prev) => ({
       ...prev,
       enquiries: prev.enquiries.filter((e) => e.id !== id),
     }));
+
+    if (isCloudConfigured()) {
+      try {
+        await deleteEnquiryFromCloud(id);
+      } catch (err) {
+        console.error('Cloud enquiry delete error:', err);
+      }
+    }
     showToast('Enquiry record deleted!', 'info');
   };
 
@@ -263,7 +525,7 @@ export const GymProvider = ({ children }) => {
         enquiries: Array.isArray(parsed.enquiries) ? parsed.enquiries : INITIAL_DATA.enquiries,
         settings: { ...INITIAL_DATA.settings, ...(parsed.settings || {}) },
       });
-      showToast('Website content restored from backup file successfully!', 'success');
+      showToast('Backup restored successfully!', 'success');
       return { success: true };
     } catch (err) {
       showToast(`Import failed: ${err.message}`, 'error');
@@ -319,6 +581,15 @@ export const GymProvider = ({ children }) => {
         toasts,
         showToast,
         removeToast,
+        // Cloud Sync Features
+        isCloudActive,
+        isCloudSyncing,
+        lastCloudSync,
+        cloudError,
+        refreshFromCloud,
+        syncAllToCloud,
+        configureCloudCredentials,
+        clearCloudCredentials,
       }}
     >
       {children}

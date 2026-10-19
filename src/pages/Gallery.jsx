@@ -50,7 +50,14 @@ export const Gallery = ({ setActivePage }) => {
               className="gallery-item"
               onClick={() => setLightboxImage(item)}
             >
-              <img src={item.image} alt={item.title} loading="lazy" />
+              <img
+                src={item.image}
+                alt={item.title}
+                loading="lazy"
+                onError={(e) => {
+                  e.target.src = '/images/gym_interior.jpg';
+                }}
+              />
               <div className="gallery-item-overlay">
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
                   <span className="gallery-item-cat">{item.category}</span>

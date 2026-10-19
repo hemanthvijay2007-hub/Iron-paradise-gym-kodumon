@@ -1,19 +1,26 @@
 import React, { useState, useRef } from 'react';
 import { compressImageFile } from '../utils/imageUtils';
-import { FolderOpen, X, CheckCircle2, AlertCircle } from 'lucide-react';
+import { uploadImageToCloudStorage } from '../services/storageService';
+import { isCloudConfigured } from '../services/supabaseClient';
+import { FolderOpen, X, CheckCircle2, AlertCircle, Cloud, Loader2 } from 'lucide-react';
 
 export const ImageUploader = ({
   value,
   onChange,
   label = 'Select Image',
+  folder = 'general',
   recommendedText = 'Recommended: Landscape or Square (JPEG, PNG, WebP)',
 }) => {
   const fileInputRef = useRef(null);
   const [mode, setMode] = useState('file'); // 'file' or 'url'
   const [isProcessing, setIsProcessing] = useState(false);
+  const [processingStatus, setProcessingStatus] = useState('');
   const [error, setError] = useState('');
   const [fileMeta, setFileMeta] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
+
+  const isCloudActive = isCloudConfigured();
+  const isCloudUrl = typeof value === 'string' && value.includes('supabase.co/storage');
 
   const handleFileChange = async (e) => {
     const file = e.target.files?.[0];
@@ -25,18 +32,32 @@ export const ImageUploader = ({
   const processFile = async (file) => {
     setError('');
     setIsProcessing(true);
+    setProcessingStatus('Optimizing image...');
     try {
-      const result = await compressImageFile(file, 1280, 1280, 0.85);
+      // 1. Always compress first to optimize resolution and size
+      const result = await compressImageFile(file, 1600, 1600, 0.85);
+
       setFileMeta({
         name: result.originalName,
         dimensions: `${result.width} × ${result.height}`,
         sizeKb: result.approxSizeKb,
       });
-      onChange(result.dataUrl);
+
+      // 2. If Cloud Storage is configured, upload directly to Supabase Storage
+      if (isCloudConfigured()) {
+        setProcessingStatus('Uploading to Cloud Storage (Syncing across devices)...');
+        const uploadRes = await uploadImageToCloudStorage(result.dataUrl, folder);
+        onChange(uploadRes.publicUrl);
+      } else {
+        // Fallback for local demo mode before Supabase keys are entered
+        onChange(result.dataUrl);
+      }
     } catch (err) {
+      console.error('Image processing or upload error:', err);
       setError(err.message || 'Failed to process image file');
     } finally {
       setIsProcessing(false);
+      setProcessingStatus('');
     }
   };
 
@@ -71,7 +92,9 @@ export const ImageUploader = ({
   return (
     <div className="form-group" style={{ marginBottom: '1.25rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
-        <label className="form-label" style={{ margin: 0 }}>{label} *</label>
+        <label className="form-label" style={{ margin: 0 }}>
+          {label} *
+        </label>
         <div style={{ display: 'flex', gap: '0.35rem' }}>
           <button
             type="button"
@@ -131,12 +154,44 @@ export const ImageUploader = ({
                   src={value}
                   alt="Upload preview"
                   style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                  onError={(e) => {
+                    e.target.src = '/images/gym_interior.jpg';
+                  }}
                 />
               </div>
 
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#10b981', fontSize: '0.8rem', fontWeight: 700, marginBottom: '0.2rem' }}>
-                  <CheckCircle2 size={14} /> Image Ready
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.2rem' }}>
+                  {isCloudUrl ? (
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.3rem',
+                        color: '#38bdf8',
+                        fontSize: '0.75rem',
+                        fontWeight: 700,
+                        background: 'rgba(56, 189, 248, 0.1)',
+                        padding: '0.15rem 0.45rem',
+                        borderRadius: '4px',
+                      }}
+                    >
+                      <Cloud size={13} /> Cloud CDN (Multi-Device Active)
+                    </span>
+                  ) : (
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.3rem',
+                        color: '#10b981',
+                        fontSize: '0.75rem',
+                        fontWeight: 700,
+                      }}
+                    >
+                      <CheckCircle2 size={13} /> Image Ready
+                    </span>
+                  )}
                 </div>
                 <div
                   style={{
@@ -148,11 +203,11 @@ export const ImageUploader = ({
                     textOverflow: 'ellipsis',
                   }}
                 >
-                  {fileMeta?.name || 'Selected from device / presets'}
+                  {fileMeta?.name || (isCloudUrl ? 'Cloud Storage Image' : 'Selected image')}
                 </div>
                 {fileMeta && (
                   <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '0.15rem' }}>
-                    {fileMeta.dimensions} • ~{fileMeta.sizeKb} KB (Optimized)
+                    {fileMeta.dimensions} • ~{fileMeta.sizeKb} KB
                   </div>
                 )}
               </div>
@@ -184,7 +239,7 @@ export const ImageUploader = ({
               onDrop={handleDrop}
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => !isProcessing && fileInputRef.current?.click()}
               style={{
                 border: isDragging
                   ? '2px dashed var(--red-primary)'
@@ -193,13 +248,21 @@ export const ImageUploader = ({
                 borderRadius: 'var(--radius-sm)',
                 padding: '2rem 1.5rem',
                 textAlign: 'center',
-                cursor: 'pointer',
+                cursor: isProcessing ? 'wait' : 'pointer',
                 transition: 'all var(--transition-fast)',
               }}
             >
               {isProcessing ? (
-                <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-                  ⏳ Compressing & optimizing photo...
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
+                  <Loader2 size={28} className="animate-spin" color="var(--red-primary)" />
+                  <div style={{ color: '#fff', fontSize: '0.9rem', fontWeight: 600 }}>
+                    {processingStatus || 'Processing image...'}
+                  </div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                    {isCloudActive
+                      ? 'Saving to Cloud Storage for multi-device visibility'
+                      : 'Compressing photo for fast performance'}
+                  </div>
                 </div>
               ) : (
                 <>
@@ -227,6 +290,23 @@ export const ImageUploader = ({
                   <div style={{ color: 'var(--text-dim)', fontSize: '0.75rem', marginTop: '0.5rem' }}>
                     {recommendedText}
                   </div>
+                  {isCloudActive && (
+                    <div
+                      style={{
+                        marginTop: '0.75rem',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                        color: '#38bdf8',
+                        fontSize: '0.72rem',
+                        background: 'rgba(56, 189, 248, 0.1)',
+                        padding: '0.2rem 0.6rem',
+                        borderRadius: '999px',
+                      }}
+                    >
+                      <Cloud size={12} /> Auto-syncs to Cloud Storage for all visitors
+                    </div>
+                  )}
                 </>
               )}
             </div>
@@ -244,14 +324,27 @@ export const ImageUploader = ({
             onChange={(e) => onChange(e.target.value)}
           />
           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
-            Tip: You can use local presets like <code>/images/gym_interior.jpg</code>, <code>/images/hero_gym.jpg</code>, or an external URL.
+            Tip: You can use preset paths like <code>/images/gym_interior.jpg</code>, <code>/images/hero_gym.jpg</code>, or an external HTTPS URL.
           </div>
         </div>
       )}
 
       {error && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#ef4444', fontSize: '0.8rem', marginTop: '0.5rem' }}>
-          <AlertCircle size={14} /> {error}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.4rem',
+            color: '#ef4444',
+            fontSize: '0.8rem',
+            marginTop: '0.5rem',
+            background: 'rgba(239, 68, 68, 0.1)',
+            padding: '0.4rem 0.6rem',
+            borderRadius: 'var(--radius-sm)',
+          }}
+        >
+          <AlertCircle size={15} style={{ flexShrink: 0 }} />
+          <span>{error}</span>
         </div>
       )}
     </div>
